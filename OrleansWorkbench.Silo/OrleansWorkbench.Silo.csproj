@@ -21,6 +21,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\OrleansWorkbench.Etcd\OrleansWorkbench.Etcd.csproj" />
       <ProjectReference Include="..\OrleansWorkbench.GrainInterfaces\OrleansWorkbench.GrainInterfaces.csproj" />
       <ProjectReference Include="..\OrleansWorkbench.Grains\OrleansWorkbench.Grains.csproj" />
     </ItemGroup>

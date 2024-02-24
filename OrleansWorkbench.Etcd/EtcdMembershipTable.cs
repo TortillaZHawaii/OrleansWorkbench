@@ -10,7 +10,7 @@ using Orleans.Runtime;
 
 namespace OrleansWorkbench.Etcd;
 
-class EtcdMembershipTable : IMembershipTable, IDisposable
+public class EtcdMembershipTable : IMembershipTable, IDisposable
 {
     private const string TableVersionKeySuffix ="Version";
     private const string OrleansPrefix = "Orleans";
@@ -77,11 +77,13 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
 
     public async Task DeleteMembershipTableEntries(string clusterId)
     {
+        _logger.LogInformation("Deleting membership table entries for cluster {ClusterId}", clusterId);
         await _etcdClient.DeleteRangeAsync(clusterId, _etcdOptions.GrpcHeaders);
     }
     
     public async Task CleanupDefunctSiloEntries(DateTimeOffset beforeDate)
     {
+        _logger.LogInformation("Cleaning up defunct silo entries for cluster {ClusterId}", _clusterOptions.ClusterId);
         var entries = await ReadAll();
         foreach (var (entry, _) in entries.Members)
         {
@@ -96,6 +98,7 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
 
     public async Task<MembershipTableData> ReadRow(SiloAddress key)
     {
+        _logger.LogInformation("Reading row for key {Key}", key);
         var txn = new Etcdserverpb.TxnRequest
         {
             Success =
@@ -139,6 +142,7 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
 
     public async Task<MembershipTableData> ReadAll()
     {
+        _logger.LogInformation("Reading all rows for cluster {ClusterId}", _clusterOptions.ClusterId);
         var all = await _etcdClient.GetRangeAsync(_clusterKey, _etcdOptions.GrpcHeaders);
         
         var tableVersionRow = all.Kvs.SingleOrDefault(h => _tableVersionByteKey.Equals(h.Key))?.Value;
@@ -155,12 +159,14 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
 
     public async Task<bool> InsertRow(MembershipEntry entry, TableVersion tableVersion)
     {
+        _logger.LogInformation("Inserting row for key {Key}", entry.SiloAddress);
         return await UpsertRowInternal(entry, tableVersion, updateTableVersion: true, allowInsertOnly: true) 
                == UpsertResult.Success;
     }
 
     public async Task<bool> UpdateRow(MembershipEntry entry, string etag, TableVersion tableVersion)
     {
+        _logger.LogInformation("Updating row for key {Key}", entry.SiloAddress);
         return await UpsertRowInternal(entry, tableVersion, updateTableVersion: true, allowInsertOnly: false) 
                == UpsertResult.Success;
     }
@@ -172,8 +178,11 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
         var rowKey = $"{_clusterKey}/{entry.SiloAddress}";
         var rowByteKey = ByteString.CopyFromUtf8(rowKey);
         
+        _logger.LogInformation("Upserting row for key {Key}", rowKey);
+        
         if (updateTableVersion)
         {
+            _logger.LogInformation("Setting table version {TableVersion} for cluster {ClusterId}", tableVersion, _clusterOptions.ClusterId);
             txn.Success.Add(new Etcdserverpb.RequestOp
             {
                 RequestPut =
@@ -182,6 +191,7 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
                     Value = SerializeVersion(tableVersion),
                 },
             });
+            _logger.LogInformation("Set table version {TableVersion} for cluster {ClusterId}", tableVersion, _clusterOptions.ClusterId);
         }
         
         txn.Compare.Add(new Etcdserverpb.Compare
@@ -224,14 +234,18 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
         
         if (response.Succeeded)
         {
+            _logger.LogInformation("Upserted row for key {Key}", rowKey);
             return UpsertResult.Success;
         }
         
-        if (DeserializeVersion(response.Responses[0].ResponseRange.Kvs[0].Value) != tableVersion)
+        var tableVersionRow = DeserializeVersion(response.Responses[0].ResponseRange.Kvs[0].Value);
+        if (tableVersionRow != tableVersion)
         {
+            _logger.LogWarning("Failed to upsert row for key {Key} due to conflict, expected version to be {ExpectedVersion}, but found {FoundVersion}", rowKey, tableVersion, tableVersionRow);
             return UpsertResult.Conflict;
         }
 
+        _logger.LogWarning("Failed to upsert row for key {Key}", rowKey);
         return UpsertResult.Failure;
     }
 
@@ -263,6 +277,7 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
         
         if (!response.Succeeded)
         {
+            _logger.LogWarning("Unexpected transaction failure while reading key {Key}", key);
             throw new EtcdClusteringException($"Unexpected transaction failure while reading key {key}");
         }
         
@@ -271,6 +286,7 @@ class EtcdMembershipTable : IMembershipTable, IDisposable
         
         if (entryRow == null || entryRow.IsEmpty)
         {
+            _logger.LogWarning("Could not find a value for the key {Key}", key);
             throw new EtcdClusteringException($"Could not find a value for the key {key}");
         }
         

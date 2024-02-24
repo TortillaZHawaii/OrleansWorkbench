@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OrleansWorkbench.GrainInterfaces;
 
 IHostBuilder builder = Host.CreateDefaultBuilder(args)
-    .UseOrleansClient(client => { client.UseLocalhostClustering(); })
+    .UseOrleansClient(client => { client.UseEtcdClustering("http://localhost:2379"); })
     .ConfigureLogging(logging => logging.AddConsole())
     .UseConsoleLifetime();
 

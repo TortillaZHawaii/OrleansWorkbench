@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 IHostBuilder builder = Host.CreateDefaultBuilder(args)
     .UseOrleans(silo =>
     {
-        silo.UseLocalhostClustering()
+        silo.UseEtcdClustering("http://localhost:2379")
             .ConfigureLogging(logging => logging.AddConsole());
     })
     .UseConsoleLifetime();

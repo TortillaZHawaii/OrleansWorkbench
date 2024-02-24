@@ -2,8 +2,8 @@ using Grpc.Core;
 
 namespace OrleansWorkbench.Etcd;
 
-class EtcdClusteringOptions
+public class EtcdClusteringOptions
 {
-    public required string ConnectionString { get; init; }
-    public Metadata? GrpcHeaders { get; init; }
+    public required string ConnectionString { get; set; }
+    public Metadata? GrpcHeaders { get; set; }
 }
