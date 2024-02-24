@@ -10,6 +10,7 @@
 
     <ItemGroup>
       <PackageReference Include="dotnet-etcd" Version="6.0.1" />
+      <PackageReference Include="Microsoft.Orleans.Server" Version="8.0.0" />
     </ItemGroup>
 
 </Project>
