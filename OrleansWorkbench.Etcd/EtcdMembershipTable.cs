@@ -31,7 +31,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
         _clusterOptions = clusterOptions.Value;
         _clusterKey = $"{OrleansPrefix}/{_clusterOptions.ServiceId}/Members/{_clusterOptions.ClusterId}";
         _tableVersionKey = $"{_clusterKey}/{TableVersionKeySuffix}";
-        _tableVersionByteKey = ByteString.CopyFromUtf8(TableVersionKeySuffix);
+        _tableVersionByteKey = ByteString.CopyFromUtf8(_tableVersionKey);
         _etcdClient = new EtcdClient(_etcdOptions.ConnectionString);
     }
 
@@ -179,7 +179,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
         var rowByteKey = ByteString.CopyFromUtf8(rowKey);
         
         _logger.LogInformation("Upserting row for key {Key}", rowKey);
-        
+
         if (updateTableVersion)
         {
             _logger.LogInformation("Setting table version {TableVersion} for cluster {ClusterId}", tableVersion, _clusterOptions.ClusterId);
