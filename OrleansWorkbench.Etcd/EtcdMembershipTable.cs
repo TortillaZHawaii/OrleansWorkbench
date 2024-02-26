@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using dotnet_etcd;
 using Google.Protobuf;
@@ -174,33 +173,59 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
     private async Task<UpsertResult> UpsertRowInternal(MembershipEntry entry, TableVersion tableVersion, 
         bool updateTableVersion, bool allowInsertOnly)
     {
-        var txn = new Etcdserverpb.TxnRequest();
         var rowKey = $"{_clusterKey}/{entry.SiloAddress}";
         var rowByteKey = ByteString.CopyFromUtf8(rowKey);
         
         _logger.LogInformation("Upserting row for key {Key}", rowKey);
-
-        if (updateTableVersion)
+        
+        var txn = new Etcdserverpb.TxnRequest
         {
-            _logger.LogInformation("Setting table version {TableVersion} for cluster {ClusterId}", tableVersion, _clusterOptions.ClusterId);
-            txn.Success.Add(new Etcdserverpb.RequestOp
+            Compare =
             {
-                RequestPut =
+                new Etcdserverpb.Compare
                 {
                     Key = _tableVersionByteKey,
-                    Value = SerializeVersion(tableVersion),
+                    Result = Etcdserverpb.Compare.Types.CompareResult.Equal,
+                    Target = Etcdserverpb.Compare.Types.CompareTarget.Value,
+                    Value = SerializeVersion(Predecessor(tableVersion)),
+                },
+            },
+            Success =
+            {
+                new Etcdserverpb.RequestOp
+                {
+                    RequestPut = new Etcdserverpb.PutRequest
+                    {
+                        Key = rowByteKey,
+                        Value = ByteString.CopyFrom(Serialize(entry)),
+                    },
+                },
+            },
+            Failure =
+            {
+                new Etcdserverpb.RequestOp
+                {
+                    RequestRange = new Etcdserverpb.RangeRequest
+                    {
+                        Key = _tableVersionByteKey,
+                    },
+                },
+            },
+        };
+        
+        if (updateTableVersion)
+        {
+            var serializedVersion = SerializeVersion(tableVersion);
+            txn.Success.Add(new Etcdserverpb.RequestOp
+            {
+                RequestPut = new Etcdserverpb.PutRequest
+                {
+                    Key = _tableVersionByteKey,
+                    Value = serializedVersion,
                 },
             });
             _logger.LogInformation("Set table version {TableVersion} for cluster {ClusterId}", tableVersion, _clusterOptions.ClusterId);
         }
-        
-        txn.Compare.Add(new Etcdserverpb.Compare
-        {
-            Key = _tableVersionByteKey,
-            Result = Etcdserverpb.Compare.Types.CompareResult.Equal,
-            Target = Etcdserverpb.Compare.Types.CompareTarget.Value,
-            Value = SerializeVersion(Predecessor(tableVersion)),
-        });
         
         if (allowInsertOnly)
         {
@@ -212,23 +237,6 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
                 CreateRevision = 0,
             });
         }
-        
-        txn.Success.Add(new Etcdserverpb.RequestOp
-        {
-            RequestPut =
-            {
-                Key = rowByteKey,
-                Value = ByteString.CopyFrom(Serialize(entry)),
-            },
-        });
-        
-        txn.Failure.Add(new Etcdserverpb.RequestOp
-        {
-            RequestRange = new Etcdserverpb.RangeRequest
-            {
-                Key = _tableVersionByteKey,
-            },
-        });
         
         var response = await _etcdClient.TransactionAsync(txn, _etcdOptions.GrpcHeaders);
         
@@ -313,7 +321,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
     }
 
     private static ByteString SerializeVersion(TableVersion version) =>
-        ByteString.CopyFromUtf8(version.VersionEtag);
+        ByteString.CopyFromUtf8(version.Version.ToString(CultureInfo.InvariantCulture));
 
     private static TableVersion DeserializeVersion(string versionString)
     {
