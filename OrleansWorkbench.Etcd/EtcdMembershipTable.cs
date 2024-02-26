@@ -77,7 +77,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
     public async Task DeleteMembershipTableEntries(string clusterId)
     {
         _logger.LogInformation("Deleting membership table entries for cluster {ClusterId}", clusterId);
-        await _etcdClient.DeleteRangeAsync(clusterId, _etcdOptions.GrpcHeaders);
+        await _etcdClient.DeleteRangeAsync($"{OrleansPrefix}/{clusterId}/Members/{clusterId}", _etcdOptions.GrpcHeaders);
     }
     
     public async Task CleanupDefunctSiloEntries(DateTimeOffset beforeDate)
@@ -90,7 +90,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
                 && new DateTime(Math.Max(entry.IAmAliveTime.Ticks, entry.StartTime.Ticks), DateTimeKind.Utc) < beforeDate)
             {
                 // best effort
-                await _etcdClient.DeleteRangeAsync(entry.SiloAddress.ToString(), _etcdOptions.GrpcHeaders);
+                await _etcdClient.DeleteRangeAsync($"{_clusterKey}/{entry.SiloAddress}", _etcdOptions.GrpcHeaders);
             }
         }
     }
@@ -177,6 +177,8 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
         var rowByteKey = ByteString.CopyFromUtf8(rowKey);
         
         _logger.LogInformation("Upserting row for key {Key}", rowKey);
+
+        var predecessor = Predecessor(tableVersion);
         
         var txn = new Etcdserverpb.TxnRequest
         {
@@ -187,7 +189,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
                     Key = _tableVersionByteKey,
                     Result = Etcdserverpb.Compare.Types.CompareResult.Equal,
                     Target = Etcdserverpb.Compare.Types.CompareTarget.Value,
-                    Value = SerializeVersion(Predecessor(tableVersion)),
+                    Value = SerializeVersion(predecessor),
                 },
             },
             Success =
@@ -246,10 +248,10 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
             return UpsertResult.Success;
         }
         
-        var tableVersionRow = DeserializeVersion(response.Responses[0].ResponseRange.Kvs[0].Value);
-        if (tableVersionRow != tableVersion)
+        var tableVersionFound = DeserializeVersion(response.Responses[0].ResponseRange.Kvs[0].Value);
+        if (tableVersionFound != predecessor)
         {
-            _logger.LogWarning("Failed to upsert row for key {Key} due to conflict, expected version to be {ExpectedVersion}, but found {FoundVersion}", rowKey, tableVersion, tableVersionRow);
+            _logger.LogWarning("Failed to upsert row for key {Key} due to conflict, expected version to be {ExpectedVersion}, but found {FoundVersion}", rowKey, predecessor, tableVersionFound);
             return UpsertResult.Conflict;
         }
 
@@ -275,7 +277,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
                 {
                     RequestRange = new Etcdserverpb.RangeRequest
                     {
-                        Key = ByteString.CopyFromUtf8(key),
+                        Key = ByteString.CopyFromUtf8($"{_clusterKey}/{key}"),
                     },
                 },
             }
@@ -290,20 +292,21 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
         }
         
         var tableVersion = DeserializeVersion(response.Responses[0].ResponseRange.Kvs[0].Value);
-        var entryRow = response.Responses[1].ResponseRange.Kvs[0].Value;
+        var nextTableVersion = tableVersion.Next();
+        var entryRow = response.Responses[1].ResponseRange.Kvs.FirstOrDefault();
         
-        if (entryRow == null || entryRow.IsEmpty)
+        if (entryRow == null || entryRow.Value.IsEmpty)
         {
             _logger.LogWarning("Could not find a value for the key {Key}", key);
             throw new EtcdClusteringException($"Could not find a value for the key {key}");
         }
         
-        var existingEntry = Deserialize(entryRow.Span);
+        var existingEntry = Deserialize(entryRow.Value.Span);
         
         // Update only the IAmAliveTime property.
         existingEntry.IAmAliveTime = entry.IAmAliveTime;
         
-        var result = await UpsertRowInternal(existingEntry, tableVersion, updateTableVersion: false, allowInsertOnly: false);
+        var result = await UpsertRowInternal(existingEntry, nextTableVersion, updateTableVersion: false, allowInsertOnly: false);
         
         if (result == UpsertResult.Conflict)
         {
