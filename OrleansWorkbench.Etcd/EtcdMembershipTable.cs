@@ -77,7 +77,7 @@ public class EtcdMembershipTable : IMembershipTable, IDisposable
     public async Task DeleteMembershipTableEntries(string clusterId)
     {
         _logger.LogInformation("Deleting membership table entries for cluster {ClusterId}", clusterId);
-        await _etcdClient.DeleteRangeAsync($"{OrleansPrefix}/{clusterId}/Members/{clusterId}", _etcdOptions.GrpcHeaders);
+        await _etcdClient.DeleteRangeAsync(_clusterKey, _etcdOptions.GrpcHeaders);
     }
     
     public async Task CleanupDefunctSiloEntries(DateTimeOffset beforeDate)
